@@ -158,13 +158,14 @@ func (cfg *SDConfig) InitDefaults() {
 	if cfg.QueryInterval.Duration == 0 {
 		cfg.QueryInterval.Duration = DefaultQueryInterval
 	}
+	cfg.PathQuality.InitDefaults()
 }
 
 func (cfg *SDConfig) Validate() error {
 	if cfg.QueryInterval.Duration == 0 {
 		return serrors.New("QueryInterval must not be zero")
 	}
-	return nil
+	return cfg.PathQuality.Validate()
 }
 
 func (cfg *SDConfig) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) {
@@ -173,4 +174,32 @@ func (cfg *SDConfig) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) 
 
 func (cfg *SDConfig) ConfigName() string {
 	return "sd"
+}
+
+// InitDefaults sets sensible defaults for PathQualityConfig.
+func (cfg *PathQualityConfig) InitDefaults() {
+	if cfg.ProbeInterval.Duration == 0 {
+		cfg.ProbeInterval.Duration = 500 * time.Millisecond
+	}
+	if cfg.PathRefreshInterval.Duration == 0 {
+		cfg.PathRefreshInterval.Duration = 10 * time.Second
+	}
+	if cfg.MaxRTT.Duration == 0 {
+		cfg.MaxRTT.Duration = 200 * time.Millisecond
+	}
+	if cfg.MaxLossRate == 0 {
+		cfg.MaxLossRate = 0.05
+	}
+	if cfg.MaxJitter.Duration == 0 {
+		cfg.MaxJitter.Duration = 30 * time.Millisecond
+	}
+}
+
+// Validate checks PathQualityConfig for invalid values.
+func (cfg *PathQualityConfig) Validate() error {
+	if cfg.MaxLossRate < 0 || cfg.MaxLossRate > 1 {
+		return serrors.New("path_quality.max_loss_rate must be between 0 and 1",
+			"value", cfg.MaxLossRate)
+	}
+	return nil
 }
