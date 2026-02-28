@@ -36,6 +36,8 @@ import (
 	"github.com/scionproto/scion/daemon"
 	"github.com/scionproto/scion/daemon/config"
 	api "github.com/scionproto/scion/daemon/mgmtapi"
+	"github.com/scionproto/scion/daemon/pathquality"
+	pqintegration "github.com/scionproto/scion/daemon/pathquality/integration"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon/fetcher"
 	daemontrust "github.com/scionproto/scion/pkg/daemon/private/trust"
@@ -47,6 +49,7 @@ import (
 	"github.com/scionproto/scion/pkg/private/prom"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	sdpb "github.com/scionproto/scion/pkg/proto/daemon"
+	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/private/app"
 	"github.com/scionproto/scion/private/app/launcher"
 	sddrkey "github.com/scionproto/scion/private/drkey"
@@ -269,30 +272,76 @@ func realMain(ctx context.Context) error {
 		libgrpc.UnaryServerInterceptor(),
 		libgrpc.DefaultMaxConcurrentStreams(),
 	)
-	sdpb.RegisterDaemonServiceServer(server, daemon.NewServer(
-		daemon.ServerConfig{
-			IA:          topo.IA(),
-			MTU:         topo.MTU(),
-			LocalASInfo: topo,
-			Fetcher: fetcher.NewFetcher(
-				fetcher.FetcherConfig{
-					IA:            topo.IA(),
-					MTU:           topo.MTU(),
-					Core:          topo.Core(),
-					NextHopper:    topo,
-					RPC:           requester,
-					PathDB:        pathDB,
-					Inspector:     engine,
-					Verifier:      createVerifier(),
-					RevCache:      revCache,
-					QueryInterval: globalCfg.SD.QueryInterval.Duration,
-				},
-			),
-			Engine:      engine,
-			RevCache:    revCache,
-			DRKeyClient: drkeyClientEngine,
+
+	// Create the path fetcher (extracted to reuse with quality monitor).
+	pathFetcher := fetcher.NewFetcher(
+		fetcher.FetcherConfig{
+			IA:            topo.IA(),
+			MTU:           topo.MTU(),
+			Core:          topo.Core(),
+			NextHopper:    topo,
+			RPC:           requester,
+			PathDB:        pathDB,
+			Inspector:     engine,
+			Verifier:      createVerifier(),
+			RevCache:      revCache,
+			QueryInterval: globalCfg.SD.QueryInterval.Duration,
 		},
-	))
+	)
+
+	// Optionally create the quality-aware path monitor.
+	var qualityDaemon *pqintegration.QualityDaemon
+	if globalCfg.SD.PathQuality.Enable {
+		localIP, err := pathquality.ResolveLocalIP()
+		if err != nil {
+			log.Info("Could not resolve local IP for quality monitor, using unspecified",
+				"err", err)
+		}
+
+		pqCfg := pqintegration.Config{
+			LocalIA:  topo.IA(),
+			LocalIP:  localIP,
+			Topology: snet.Topology{LocalIA: topo.IA()},
+			Fetcher:  pathFetcher,
+		}
+		if globalCfg.SD.PathQuality.ProbeInterval.Duration > 0 {
+			pqCfg.ProbeInterval = globalCfg.SD.PathQuality.ProbeInterval.Duration
+		}
+		if globalCfg.SD.PathQuality.PathRefreshInterval.Duration > 0 {
+			pqCfg.PathRefreshInterval = globalCfg.SD.PathQuality.PathRefreshInterval.Duration
+		}
+		if globalCfg.SD.PathQuality.MaxRTT.Duration > 0 ||
+			globalCfg.SD.PathQuality.MaxLossRate > 0 ||
+			globalCfg.SD.PathQuality.MaxJitter.Duration > 0 {
+			pqCfg.ReroutePolicy = pathquality.ReroutePolicy{
+				MaxRTT:           globalCfg.SD.PathQuality.MaxRTT.Duration,
+				MaxLossRate:      globalCfg.SD.PathQuality.MaxLossRate,
+				MaxJitter:        globalCfg.SD.PathQuality.MaxJitter.Duration,
+				MinScore:         0.5,
+				HysteresisMargin: 0.15,
+			}
+		}
+
+		qualityDaemon = pqintegration.New(pqCfg)
+		log.Info("Quality-aware path monitoring enabled",
+			"probe_interval", pqCfg.ProbeInterval,
+			"path_refresh", pqCfg.PathRefreshInterval,
+		)
+	}
+
+	serverCfg := daemon.ServerConfig{
+		IA:          topo.IA(),
+		MTU:         topo.MTU(),
+		LocalASInfo: topo,
+		Fetcher:     pathFetcher,
+		Engine:      engine,
+		RevCache:    revCache,
+		DRKeyClient: drkeyClientEngine,
+	}
+	if qualityDaemon != nil {
+		serverCfg.QualityMonitor = qualityDaemon
+	}
+	sdpb.RegisterDaemonServiceServer(server, daemon.NewServer(serverCfg))
 
 	promgrpc.Register(server)
 
@@ -306,6 +355,12 @@ func realMain(ctx context.Context) error {
 	})
 	cleanup.Add(func() error { server.GracefulStop(); return nil })
 
+	// Start quality monitor if enabled.
+	if qualityDaemon != nil {
+		qualityDaemon.Start(errCtx)
+		cleanup.Add(func() error { qualityDaemon.Stop(); return nil })
+	}
+
 	if globalCfg.API.Addr != "" {
 		r := chi.NewRouter()
 		r.Use(cors.Handler(cors.Options{
@@ -313,6 +368,10 @@ func realMain(ctx context.Context) error {
 		}))
 		r.Get("/", api.ServeSpecInteractive)
 		r.Get("/openapi.json", api.ServeSpecJSON)
+		// Mount path quality REST API if quality monitoring is enabled.
+		if qualityDaemon != nil {
+			r.Mount("/", qualityDaemon.HTTPHandler())
+		}
 		server := api.Server{
 			SegmentsServer: segapi.Server{
 				Segments: pathDB,

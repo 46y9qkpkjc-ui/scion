@@ -16,6 +16,7 @@
 package daemon
 
 import (
+	"context"
 	"io"
 	"net"
 	"strconv"
@@ -56,11 +57,17 @@ type ServerConfig struct {
 	Engine      trust.Engine
 	LocalASInfo asinfo.LocalASInfo
 	DRKeyClient *drkey.ClientEngine
+	// QualityMonitor is an optional quality-aware path monitor.
+	// When non-nil, it is attached to the DaemonServer for lifecycle management.
+	QualityMonitor interface {
+		Start(ctx context.Context)
+		Stop()
+	}
 }
 
 // NewServer constructs a daemon API server.
 func NewServer(cfg ServerConfig) *grpc.DaemonServer {
-	return &grpc.DaemonServer{
+	ds := &grpc.DaemonServer{
 		Engine: &engine.DaemonEngine{
 			IA:  cfg.IA,
 			MTU: cfg.MTU,
@@ -73,6 +80,7 @@ func NewServer(cfg ServerConfig) *grpc.DaemonServer {
 			RevCache:    cfg.RevCache,
 			DRKeyClient: cfg.DRKeyClient,
 		},
+		QualityMonitor: cfg.QualityMonitor,
 		Metrics: grpc.Metrics{
 			PathsRequests: grpc.RequestMetrics{
 				Requests: metrics.NewPromCounterFrom(prometheus.CounterOpts{
@@ -152,6 +160,7 @@ func NewServer(cfg ServerConfig) *grpc.DaemonServer {
 			},
 		},
 	}
+	return ds
 }
 
 // APIAddress returns the API address to listen on, based on the provided

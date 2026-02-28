@@ -55,6 +55,12 @@ type Topology interface {
 type DaemonServer struct {
 	Engine  *engine.DaemonEngine
 	Metrics Metrics
+	// QualityMonitor is an optional quality-aware path monitor.
+	// When set, path quality metrics are collected and can be queried.
+	QualityMonitor interface {
+		Start(ctx context.Context)
+		Stop()
+	}
 }
 
 // NewDaemonServer creates a new DaemonServer with the given configuration.

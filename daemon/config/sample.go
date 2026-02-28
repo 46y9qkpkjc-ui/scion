@@ -29,4 +29,19 @@ query_interval = "5m"
 
 # The configuration containing hidden path groups. (default "")
 hidden_path_groups =  ""
+
+# Quality-aware path monitoring and rerouting configuration.
+[sd.path_quality]
+  # Enable quality-aware path monitoring. (default false)
+  enable = false
+  # How often probes are sent per path. (default 500ms)
+  probe_interval = "500ms"
+  # How often the path list is refreshed from the path DB. (default 10s)
+  path_refresh_interval = "10s"
+  # RTT threshold for path degradation detection. (default 200ms)
+  max_rtt = "200ms"
+  # Packet loss rate threshold (0.0-1.0). (default 0.05)
+  max_loss_rate = 0.05
+  # Jitter threshold for path degradation detection. (default 30ms)
+  max_jitter = "30ms"
 `

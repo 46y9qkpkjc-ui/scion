@@ -131,6 +131,24 @@ type SDConfig struct {
 	// If HiddenPathGroups begins with http:// or https://, it will be fetched
 	// over the network from the specified URL instead.
 	HiddenPathGroups string `toml:"hidden_path_groups,omitempty"`
+	// PathQuality configures quality-aware path monitoring and rerouting.
+	PathQuality PathQualityConfig `toml:"path_quality,omitempty"`
+}
+
+// PathQualityConfig configures the quality-aware path monitoring.
+type PathQualityConfig struct {
+	// Enable activates quality-aware path monitoring. (default false)
+	Enable bool `toml:"enable,omitempty"`
+	// ProbeInterval is how often probes are sent per path. (default 500ms)
+	ProbeInterval util.DurWrap `toml:"probe_interval,omitempty"`
+	// PathRefreshInterval is how often the path list is refreshed. (default 10s)
+	PathRefreshInterval util.DurWrap `toml:"path_refresh_interval,omitempty"`
+	// MaxRTT is the RTT threshold for path degradation. (default 200ms)
+	MaxRTT util.DurWrap `toml:"max_rtt,omitempty"`
+	// MaxLossRate is the loss rate threshold for path degradation. (default 0.05)
+	MaxLossRate float64 `toml:"max_loss_rate,omitempty"`
+	// MaxJitter is the jitter threshold for path degradation. (default 30ms)
+	MaxJitter util.DurWrap `toml:"max_jitter,omitempty"`
 }
 
 func (cfg *SDConfig) InitDefaults() {
