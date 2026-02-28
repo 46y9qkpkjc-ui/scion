@@ -44,6 +44,10 @@ service DaemonService {
     rpc DRKeyHostAS (DRKeyHostASRequest) returns (DRKeyHostASResponse) {}
     // DRKeyHostHost returns a key that matches the request.
     rpc DRKeyHostHost (DRKeyHostHostRequest) returns (DRKeyHostHostResponse) {}
+    // PathQuality returns measured quality metrics for paths to a destination.
+    // Unlike the static latency/bandwidth in Path messages (from beacon announcements),
+    // these are actively measured values from SCMP probes.
+    rpc PathQuality(PathQualityRequest) returns (PathQualityResponse) {}
 }
 
 message PathsRequest {
@@ -289,4 +293,47 @@ message DRKeyHostHostResponse{
     google.protobuf.Timestamp epoch_end = 2;
     // Level2 key.
     bytes key = 3;
+}
+
+// PathQualityRequest requests measured quality metrics for paths to a destination.
+message PathQualityRequest {
+    // ISD-AS of the destination to query quality for.
+    uint64 destination_isd_as = 1;
+}
+
+// PathQualityResponse contains measured quality metrics for all monitored paths.
+message PathQualityResponse {
+    // Quality metrics for each monitored path, keyed by path fingerprint.
+    repeated PathQualityMetrics paths = 1;
+}
+
+// PathQualityMetrics contains actively measured quality data for a single path.
+message PathQualityMetrics {
+    // The raw data-plane path (same as in Path message).
+    bytes raw = 1;
+    // The list of interfaces the path is composed of.
+    repeated PathInterface interfaces = 2;
+    // Measured round-trip time (EWMA smoothed).
+    google.protobuf.Duration rtt = 3;
+    // Minimum observed RTT.
+    google.protobuf.Duration min_rtt = 4;
+    // Maximum observed RTT.
+    google.protobuf.Duration max_rtt = 5;
+    // Measured jitter (RTT variance, EWMA smoothed).
+    google.protobuf.Duration jitter = 6;
+    // Measured packet loss rate (0.0 to 1.0).
+    double loss_rate = 7;
+    // Total probes sent.
+    uint64 probes_sent = 8;
+    // Total probes for which replies were received.
+    uint64 probes_received = 9;
+    // Whether the path is currently alive (responding to probes).
+    bool is_alive = 10;
+    // Composite quality score (0.0 = worst, 1.0 = best).
+    // Computed as: 40% latency + 35% loss + 25% jitter.
+    double score = 11;
+    // Time of last probe sent.
+    google.protobuf.Timestamp last_probe_time = 12;
+    // Time of last probe reply received.
+    google.protobuf.Timestamp last_reply_time = 13;
 }

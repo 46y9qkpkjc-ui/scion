@@ -54,6 +54,7 @@ func main() {
 		newPing(cmd),
 		newShowpaths(cmd),
 		newTraceroute(cmd),
+		newPathquality(cmd),
 		newAddress(cmd),
 		newGendocs(cmd),
 	)
